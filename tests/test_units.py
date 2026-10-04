@@ -175,3 +175,9 @@ def test_stall_accounting(tmp_path: Path, async_save: bool):
     if not async_save:
         assert s.stall_s == s.total_s, "a sync save blocks for the whole write"
         assert blocked >= s.total_s * 0.9
+
+
+def test_watchdog_stop_joins_thread():
+    wd = Watchdog(30).start()
+    wd.stop()
+    assert not wd._thread.is_alive(), "no daemon thread may outlive training"

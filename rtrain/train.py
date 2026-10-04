@@ -13,6 +13,7 @@ was never interrupted.
 from __future__ import annotations
 
 import dataclasses
+import faulthandler
 import json
 import logging
 import math
@@ -107,6 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     restart = int(os.environ.get("TORCHELASTIC_RESTART_COUNT", 0))
     distributed = world > 1
     use_cuda = torch.cuda.is_available()
+    faulthandler.enable()  # print the Python stack on SIGSEGV/SIGABRT/etc. in any worker
     if distributed:
         # Bound collective waits so a dead peer surfaces as an error, not a 30-minute hang.
         dist.init_process_group("nccl" if use_cuda else "gloo", timeout=timedelta(seconds=max(30.0, cfg.hang_timeout)))
@@ -259,11 +261,14 @@ def main(argv: list[str] | None = None) -> int:
     watchdog.stop()
     if is_main:
         ckpt.wait()
+        if not stopped:
+            events.emit("completed", step=cfg.steps, eval_loss=round(eval_loss(model, cfg, device), 6))
     if distributed:
+        # Finish all work first, then tear down together. If one rank exits while
+        # a peer is still inside gloo, the peer's I/O threads hit "connection
+        # reset", the C++ exception calls std::terminate, and the process aborts
+        # (exit -6) — which makes torchrun restart a job that already finished.
         dist.barrier()
-    if is_main and not stopped:
-        events.emit("completed", step=cfg.steps, eval_loss=round(eval_loss(model, cfg, device), 6))
-    if distributed:
         dist.destroy_process_group()
     return 0
 

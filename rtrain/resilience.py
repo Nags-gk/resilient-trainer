@@ -44,7 +44,11 @@ class Watchdog:
         self._last = time.monotonic()
 
     def stop(self) -> None:
+        """Stop and join the thread, so no daemon thread is still parked in a
+        timed wait during interpreter shutdown (which can abort the process)."""
         self._stop.set()
+        if self._thread.is_alive() and threading.current_thread() is not self._thread:
+            self._thread.join(timeout=5)
 
     def idle_for(self) -> float:
         return time.monotonic() - self._last
