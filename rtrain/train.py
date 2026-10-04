@@ -36,6 +36,8 @@ from .metrics import Metrics
 from .model import GPT, num_params
 from .resilience import StopFlag, Watchdog, detect_stragglers
 
+EXIT_PREEMPTED = 143
+
 
 class Events:
     """Append-only JSON-lines event log shared by all ranks (O_APPEND writes)."""
@@ -270,7 +272,10 @@ def main(argv: list[str] | None = None) -> int:
         # (exit -6) — which makes torchrun restart a job that already finished.
         dist.barrier()
         dist.destroy_process_group()
-    return 0
+    # A preempted run is unfinished, so it must not look successful: exiting 0
+    # would make torchrun skip restarts and Kubernetes mark the pod Completed,
+    # stranding the job. 143 (128 + SIGTERM) tells every orchestrator to retry.
+    return EXIT_PREEMPTED if stopped else 0
 
 
 if __name__ == "__main__":

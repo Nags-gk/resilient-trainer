@@ -7,11 +7,13 @@ and its worker (SIGKILL, like a deleted pod). Every agent runs with
 --max-restarts=0, so the survivor exits too; both are restarted, rendezvous
 fresh, and the job must resume from a checkpoint and complete.
 
-    python scripts/multinode_rehearsal.py
+    python scripts/multinode_rehearsal.py          # node crash (SIGKILL)
+    python scripts/multinode_rehearsal.py delete   # pod deletion (SIGTERM, grace, replacement)
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shlex
@@ -26,6 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORK = Path(tempfile.mkdtemp(prefix="gang-"))
 OUT = WORK / "run"
 ENV = {**os.environ, "OMP_NUM_THREADS": "1", "GLOO_SOCKET_IFNAME": "lo"}
+MODE = sys.argv[1] if len(sys.argv) > 1 else "kill"  # kill: node crash; delete: pod deletion (SIGTERM)
 
 
 def agent_cmd() -> list[str]:
@@ -93,9 +96,21 @@ def main() -> int:
         agent = next(p for p in children(k1.pid) if "torch.distributed.run" in Path(f"/proc/{p}/cmdline").read_text())
         victims = [agent, *children(agent)]
         t_kill = time.time()
-        for v in victims:
-            os.kill(v, signal.SIGKILL)
-        print(f"node 1 lost (pids {victims})")
+        if MODE == "delete":
+            # Pod deletion: SIGTERM to the container's PID 1 (torchrun), grace period,
+            # then the pod is gone and the Job controller starts a replacement.
+            os.kill(agent, signal.SIGTERM)
+            time.sleep(5)
+            os.killpg(k1.pid, signal.SIGKILL)
+            for v in victims:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(v, signal.SIGKILL)
+            k1 = kubelet(1)
+            print("node 1 pod deleted (SIGTERM, grace, replacement started)")
+        else:
+            for v in victims:
+                os.kill(v, signal.SIGKILL)
+            print(f"node 1 lost (pids {victims})")
 
         deadline = time.time() + 300
         while time.time() < deadline and not any(e["event"] == "completed" for e in events()):

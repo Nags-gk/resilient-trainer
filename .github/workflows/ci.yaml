@@ -24,8 +24,10 @@ jobs:
         run: pytest tests/test_units.py
       - name: fault-injection tests (real torchrun DDP jobs)
         run: pytest tests/test_distributed.py -v
-      - name: multi-node gang-restart rehearsal (node loss)
-        run: python scripts/multinode_rehearsal.py
+      - name: multi-node rehearsal, node crash (SIGKILL)
+        run: python scripts/multinode_rehearsal.py kill
+      - name: multi-node rehearsal, pod deletion (SIGTERM + replacement)
+        run: python scripts/multinode_rehearsal.py delete
 
   chaos-bench:
     needs: test

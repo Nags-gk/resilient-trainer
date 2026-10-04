@@ -151,6 +151,7 @@ def test_sigterm_preemption_checkpoints_and_resumes_exactly(baseline: Path, tmp_
         time.sleep(0.2)
     os.killpg(proc.pid, signal.SIGTERM)  # what Kubernetes sends on pod eviction / spot reclaim
     proc.wait(timeout=60)
+    assert proc.returncode != 0, "a preempted, unfinished run must not exit 0 (orchestrators would not restart it)"
     stop = events(tmp_path, "graceful_stop")
     assert stop, proc.stdout.read().decode()
     stopped_at = stop[0]["step"]
