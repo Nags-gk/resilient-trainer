@@ -65,6 +65,31 @@ def events(out: Path, kind: str | None = None) -> list[dict]:
     return [e for e in evs if kind is None or e["event"] == kind]
 
 
+def diag(p) -> str:
+    """torchrun's failure reports (exit codes, signals, tracebacks) for assertion messages."""
+    text = (p.stdout or "") + (p.stderr or "")
+    keep = [
+        ln
+        for ln in text.splitlines()
+        if any(
+            k in ln
+            for k in (
+                "exitcode",
+                "exit_code",
+                "WATCHDOG",
+                "Traceback",
+                "Error",
+                "error",
+                "Signal",
+                "FAILED",
+                "restart",
+                "rank",
+            )
+        )
+    ]
+    return "\n".join(keep[-60:])
+
+
 def train_losses(out: Path) -> dict[int, float]:
     # Last value per step wins (a step may be logged before a crash and again after resume).
     return {e["step"]: e["loss"] for e in events(out, "train")}
@@ -88,7 +113,9 @@ def test_sigkill_worker_resumes_with_identical_results(baseline: Path, tmp_path:
     p = torchrun(tmp_path, env={"CHAOS_KILL_STEP": "53", "CHAOS_KILL_RANK": "1"})
     assert p.returncode == 0, p.stdout + p.stderr
     starts = events(tmp_path, "attempt_start")
-    assert [s["resumed_from"] for s in starts] == [0, 40], "resumes from the last checkpoint before the kill"
+    assert [s["resumed_from"] for s in starts] == [0, 40], "resumes from the last checkpoint before the kill\n" + diag(
+        p
+    )
     # Same seed, same data per (step, rank), same optimizer/RNG state: same trajectory.
     assert train_losses(tmp_path) == train_losses(baseline)
     assert events(tmp_path, "completed")[0]["eval_loss"] == events(baseline, "completed")[0]["eval_loss"]
@@ -99,7 +126,7 @@ def test_hang_is_detected_by_watchdog_and_recovered(baseline: Path, tmp_path: Pa
     p = torchrun(tmp_path, "--hang-timeout", "5", env={"CHAOS_HANG_STEP": "47", "CHAOS_HANG_RANK": "1"})
     assert p.returncode == 0, p.stdout + p.stderr
     assert "WATCHDOG" in p.stderr + p.stdout, "the watchdog, not a 30-minute backend timeout, ended the hang"
-    assert [s["resumed_from"] for s in events(tmp_path, "attempt_start")] == [0, 40]
+    assert [s["resumed_from"] for s in events(tmp_path, "attempt_start")] == [0, 40], diag(p)
     assert train_losses(tmp_path)[STEPS] == train_losses(baseline)[STEPS]
     assert time.time() - t0 < 120
 
