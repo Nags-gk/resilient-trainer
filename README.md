@@ -22,11 +22,12 @@ From [`bench/RESULTS.md`](bench/RESULTS.md) (`python scripts/chaos_bench.py`):
 |---|---|
 | SIGKILL a worker at a random step (5 trials, both ranks) | Restarted and resumed in **2.18 s median** (max 2.6 s); lost work ≤ one checkpoint interval; **5/5 runs reproduced the uninterrupted run's losses and eval loss bit-for-bit** |
 | A rank hangs inside the step | Watchdog aborts after `--hang-timeout` (not the backend's 30-minute default), dumps stacks, job resumes |
-| SIGTERM (spot reclaim / pod eviction) | All ranks agree to stop at the same step, checkpoint it, exit 0; the next run resumes from **that exact step: zero lost work** |
+| SIGTERM (spot reclaim / pod eviction) | All ranks agree to stop at the same step, checkpoint it, exit 143 so the orchestrator restarts the job; the next run resumes from **that exact step: zero lost work** |
 | Newest checkpoint corrupted on disk | SHA-256 check fails, falls back to the previous checkpoint automatically |
 | One rank 80 ms slower per step | Flagged as a straggler within one detection window |
-| A whole node lost (agent + worker SIGKILLed) | Gang restart, resumed from the last checkpoint in ~6 s (`scripts/multinode_rehearsal.py`) |
-| A training pod deleted on Kubernetes | Job recreates it, the gang re-rendezvouses, training resumes and completes (`hack/e2e.sh` on kind, in CI) |
+| A whole node lost (agent + worker SIGKILLed) | Gang restart, resumed from the last checkpoint in **6.4 s** (`scripts/multinode_rehearsal.py kill`, CI) |
+| A node's pod deleted (SIGTERM, grace period, replacement) | Stop step checkpointed, gang re-rendezvouses with the replacement, resumed from stop step 151 in **9.9 s**, zero lost steps (`scripts/multinode_rehearsal.py delete`, CI) |
+| A training pod deleted on Kubernetes | Job recreates it, the gang re-rendezvouses, training resumes from a checkpoint and completes all 600 steps (`hack/e2e.sh` on kind, in CI) |
 | Checkpoint stall, 38 MB checkpoint | Async save blocks the loop **7.4 ms vs 104.8 ms** synchronous (**−93%**) |
 
 ## How it works
@@ -60,6 +61,7 @@ flowchart TB
 - **Straggler detection must not use wall-clock step time.** Synchronous DDP makes fast ranks wait for the slow one inside the gradient all-reduce, so every rank reports the same step time. The first test injected an 80 ms delay on one rank and detection saw nothing. The detector now uses the time to reach the collective. A second bug surfaced right after: with 2 ranks, the upper median *is* the slow rank, so nothing can exceed it. The lower median fixes that, and a unit test pins it.
 - **Multi-node recovery uses a gang restart, not torchrun's per-node restarts.** In a rehearsal where one node lost its agent and worker, the survivor restarted its workers under store prefix `/worker/attempt_1` while the replacement node started at `attempt_0`. They never met, and init timed out. Running torchrun with `--max-restarts=0` and letting Kubernetes restart every container keeps all agents on the same attempt (the JobSet / PyTorchJob approach). Single-node jobs still use torchrun restarts, which is what the chaos benchmark measures.
 - **Kill the process tree, not the process group.** torchrun starts workers in their own session, so killing an agent's process group leaves its worker running. The rehearsal kills agent and workers explicitly, as a pod deletion would.
+- **A preempted run must not exit 0.** The first kind e2e deleted a pod: both ranks checkpointed cleanly and exited 0, torchrun on the surviving pod reported success, sat 300 s on its exit barrier, and the kubelet marked the pod *Completed*. The replacement pod could never rendezvous. A graceful stop is unfinished work, so it now exits 143 (128 + SIGTERM) and every orchestrator retries it.
 - **gloo has no `ReduceOp.AVG`.** Averaging is done as SUM ÷ world size, so the same code runs on gloo (CPU) and NCCL (GPU).
 
 ## Quick start
@@ -83,9 +85,9 @@ driver) for `/ckpt`.
 
 | Suite | What it proves |
 |---|---|
-| `tests/test_units.py` (18) | Checkpoint round trip and pruning (sync and async), corrupted / truncated / manifest-less checkpoints skipped, temp files ignored, async snapshot isolated from in-place updates, background failures surfaced, stall accounting, data determinism, config merging, watchdog, SIGTERM flag, straggler median |
+| `tests/test_units.py` (19) | Checkpoint round trip and pruning (sync and async), corrupted / truncated / manifest-less checkpoints skipped, temp files ignored, async snapshot isolated from in-place updates, background failures surfaced, stall accounting, data determinism, config merging, watchdog, SIGTERM flag, straggler median |
 | `tests/test_distributed.py` (6) | Real 2-process `torchrun` jobs: learning happens; SIGKILL → bit-identical resume; hang → watchdog → resume; corrupted newest checkpoint → fallback; SIGTERM → checkpoint at the stop step → exact resume; straggler flagged |
-| `scripts/multinode_rehearsal.py` | Two agents with c10d rendezvous; node loss → gang restart → resume → completion |
+| `scripts/multinode_rehearsal.py kill\|delete` (CI) | Two agents with c10d rendezvous; node crash or pod deletion → gang restart → resume → completion |
 | `hack/e2e.sh` (kind, CI) | Indexed Job + headless Service + shared volume; delete a pod mid-training; asserts resume from a checkpoint and completion |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/STUDY_GUIDE.md](docs/STUDY_GUIDE.md).

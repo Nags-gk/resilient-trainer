@@ -27,7 +27,7 @@
 4. *Why did your first straggler detector fail?* Synchronous all-reduce equalizes step times; you have to measure time to reach the collective. And with two ranks the upper median is the slow rank itself, so use the lower median.
 5. *Why gang restart on Kubernetes?* torchrun's per-node restart counter is part of the store key prefix; a replacement node starts at 0 while survivors are at N, so they never rendezvous. Restarting every container keeps them aligned; synchronous training needs all ranks anyway.
 6. *How would this change for a 1,000-GPU FSDP job?* Sharded checkpoints written in parallel by every rank; a manifest committed last (two-phase); faster detection (NCCL async error handling, heartbeats); hot spares and in-memory checkpoints to cut recovery to seconds; straggler eviction feeding the scheduler.
-7. *What does preemption handling guarantee?* Zero lost work as long as the grace period covers one step plus one checkpoint write; the stop step's checkpoint is the resume point.
+7. *What does preemption handling guarantee?* Zero lost work as long as the grace period covers one step plus one checkpoint write; the stop step's checkpoint is the resume point. The process exits 143, not 0, because exiting 0 tells torchrun and Kubernetes the job is done.
 
 ## Exercises (do these yourself)
 

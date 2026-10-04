@@ -22,7 +22,7 @@ for step in range(resumed_step, steps):
 |---|---|---|---|
 | Worker process crash (OOM, segfault, Xid) | Peer's collective errors immediately; torchrun sees a dead worker | torchrun restarts all workers (single node) or the gang restarts (multi-node); resume | Steps since the last checkpoint |
 | Hung collective / wedged device | Watchdog: no progress for `hang_timeout` | Abort with stack dump (exit 86) → restart → resume | Steps since the last checkpoint, plus the timeout |
-| Preemption (SIGTERM) | Signal handler + all-reduce agreement | Checkpoint at the current step, exit 0 | None |
+| Preemption (SIGTERM) | Signal handler + all-reduce agreement | Checkpoint at the current step, exit 143 (unfinished → restarted) | None |
 | Corrupted / partial checkpoint | Missing manifest, checksum mismatch, load error | Fall back to the next older checkpoint | One extra interval |
 | Crash during a checkpoint write | Temp file never renamed | Ignored on resume; removed by rank 0 at start | None beyond the previous checkpoint |
 | Node loss | Peers' collectives fail; kubelet / Job controller notice | Gang restart: every container exits and restarts, fresh rendezvous | Steps since the last checkpoint |
