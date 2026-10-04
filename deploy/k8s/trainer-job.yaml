@@ -1,0 +1,78 @@
+# Two-node elastic DDP training job without any operator: an Indexed Job gives
+# each pod a stable hostname (trainer-0, trainer-1) under a headless Service,
+# and torchrun's c10d rendezvous runs on trainer-0.
+#
+# Failure handling is a *gang restart*: torchrun runs with --max-restarts=0, so
+# any failure (a worker crash, a lost peer, a watchdog abort) makes every
+# container exit; the kubelet restarts them in place (restartPolicy: OnFailure)
+# and the Job controller recreates deleted pods. All agents then rendezvous
+# fresh and resume from the newest verified checkpoint on the shared volume.
+#
+# Why not torchrun's own restarts across nodes: a surviving agent restarts its
+# workers under store prefix /worker/attempt_<N>, while a replacement node
+# starts at attempt_0, so the two never meet and init times out. Restarting
+# the whole gang keeps every agent on the same attempt (the JobSet / PyTorchJob
+# approach). Single-node jobs can still use torchrun restarts safely.
+apiVersion: v1
+kind: Service
+metadata:
+  name: trainer
+spec:
+  clusterIP: None            # headless: DNS for trainer-<index>.trainer
+  publishNotReadyAddresses: true   # peers must resolve each other before training starts
+  selector: {job-name: trainer}
+  ports:
+    - {name: rdzv, port: 29400}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: trainer
+spec:
+  completions: 2
+  parallelism: 2
+  completionMode: Indexed
+  backoffLimit: 10
+  template:
+    metadata:
+      labels: {app: trainer}
+    spec:
+      subdomain: trainer       # pod DNS: trainer-<index>.trainer.<ns>.svc
+      restartPolicy: OnFailure
+      terminationGracePeriodSeconds: 60   # time for the coordinated SIGTERM checkpoint
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 10001
+      containers:
+        - name: trainer
+          image: resilient-trainer:dev
+          imagePullPolicy: IfNotPresent
+          args:
+            - --nnodes=2
+            - --nproc-per-node=1
+            - --max-restarts=0   # gang restart via the kubelet; see header
+            - --rdzv-backend=c10d
+            - --rdzv-endpoint=trainer-0.trainer:29400
+            - --rdzv-id=trainer
+            - -m
+            - rtrain.train
+            - --out-dir=/ckpt/run
+            - --steps=600
+            - --ckpt-every=50
+            - --log-every=25
+            - --hang-timeout=60
+            - --metrics-port=9100
+          ports:
+            - {name: rdzv, containerPort: 29400}
+            - {name: metrics, containerPort: 9100}
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {memory: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: ckpt, mountPath: /ckpt}
+      volumes:
+        - name: ckpt
+          hostPath: {path: /ckpt, type: DirectoryOrCreate}   # use a ReadWriteMany PVC in real clusters

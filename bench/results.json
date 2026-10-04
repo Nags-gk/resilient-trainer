@@ -1,0 +1,66 @@
+{
+  "baseline_wall_s": 26.33,
+  "steps": 600,
+  "ckpt_every": 50,
+  "trials": [
+    {
+      "kill_step": 225,
+      "kill_rank": 0,
+      "resumed_from": 200,
+      "lost_steps": 25,
+      "recovery_s": 2.18,
+      "overhead_s": 1.97,
+      "identical": true
+    },
+    {
+      "kill_step": 137,
+      "kill_rank": 1,
+      "resumed_from": 100,
+      "lost_steps": 37,
+      "recovery_s": 1.99,
+      "overhead_s": 2.08,
+      "identical": true
+    },
+    {
+      "kill_step": 262,
+      "kill_rank": 0,
+      "resumed_from": 250,
+      "lost_steps": 12,
+      "recovery_s": 2.44,
+      "overhead_s": 2.97,
+      "identical": true
+    },
+    {
+      "kill_step": 393,
+      "kill_rank": 1,
+      "resumed_from": 350,
+      "lost_steps": 43,
+      "recovery_s": 2.6,
+      "overhead_s": 2.0,
+      "identical": true
+    },
+    {
+      "kill_step": 84,
+      "kill_rank": 0,
+      "resumed_from": 50,
+      "lost_steps": 34,
+      "recovery_s": 1.99,
+      "overhead_s": 2.05,
+      "identical": true
+    }
+  ],
+  "checkpoint": {
+    "false": {
+      "stall_ms": 104.8,
+      "total_ms": 104.8,
+      "mb": 38.3
+    },
+    "true": {
+      "stall_ms": 7.4,
+      "total_ms": 151.8,
+      "mb": 38.3
+    }
+  },
+  "machine": "x86_64 Linux",
+  "cpus": 2
+}

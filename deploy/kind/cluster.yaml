@@ -1,0 +1,10 @@
+# Every node mounts the same host directory at /ckpt, standing in for a
+# ReadWriteMany volume (Azure Files / NFS / Lustre) shared by all trainer pods.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+    extraMounts: [{hostPath: /tmp/rtrain-ckpt, containerPath: /ckpt}]
+  - role: worker
+    extraMounts: [{hostPath: /tmp/rtrain-ckpt, containerPath: /ckpt}]

@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - name: install (CPU torch)
+        run: |
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - run: ruff check . && ruff format --check .
+      - name: unit tests
+        run: pytest tests/test_units.py
+      - name: fault-injection tests (real torchrun DDP jobs)
+        run: pytest tests/test_distributed.py -v
+      - name: multi-node gang-restart rehearsal (node loss)
+        run: python scripts/multinode_rehearsal.py
+
+  chaos-bench:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12", cache: pip}
+      - run: |
+          pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -e .
+      - run: python scripts/chaos_bench.py
+      - run: cat bench/RESULTS.md >> "$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p /tmp/rtrain-ckpt && chmod 777 /tmp/rtrain-ckpt
+      - uses: helm/kind-action@v1
+        with: {cluster_name: rtrain, config: deploy/kind/cluster.yaml}
+      - name: build image
+        run: |
+          docker build -t resilient-trainer:dev .
+          kind load docker-image resilient-trainer:dev --name rtrain
+      - name: delete a trainer pod mid-training
+        run: ./hack/e2e.sh

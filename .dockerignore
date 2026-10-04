@@ -1,0 +1,6 @@
+.git
+runs
+bench
+tests
+__pycache__
+*.pyc

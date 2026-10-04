@@ -1,0 +1,29 @@
+[project]
+name = "resilient-trainer"
+version = "0.1.0"
+description = "Fault-tolerant distributed PyTorch training: verified async checkpoints, preemption handling, hang watchdog, straggler detection"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.3", "prometheus-client>=0.20", "pyyaml>=6"]
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E741"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["rtrain"]
